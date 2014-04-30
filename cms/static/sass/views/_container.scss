@@ -118,6 +118,11 @@ body.view-container .content-primary {
 
   .vert-mod {
 
+    // min-height to allow drop when empty
+    .vertical-container {
+      min-height: ($baseline*2.5);
+    }
+
     .vert {
       position: relative;
 
