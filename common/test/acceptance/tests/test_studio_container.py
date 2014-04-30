@@ -60,10 +60,12 @@ class ContainerBase(UniqueCourseTest):
             )
         ).install()
 
-    def go_to_container_page(self):
+    def go_to_container_page(self, make_draft=False):
         self.outline.visit()
         subsection = self.outline.section('Test Section').subsection('Test Subsection')
         unit = subsection.toggle_expand().unit('Test Unit').go_to()
+        if make_draft:
+            unit.edit_draft()
         container = unit.components[0].go_to_container()
         return container
 
@@ -83,7 +85,7 @@ class DragAndDropTest(ContainerBase):
 
 
     def test_reorder_in_group(self):
-        container = self.go_to_container_page()
+        container = self.go_to_container_page(make_draft=True)
         # Swap Group A Item 1 and Group A Item 2.
         container.drag(1, 2)
 
