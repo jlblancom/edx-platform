@@ -89,7 +89,7 @@ define(["jquery", "underscore", "js/views/baseview", "js/utils/handle_iframe_bin
 
                     link = $("#link");
                     expect(link).not.toHaveClass("is-disabled");
-                    view.disableElementWhileRunning(link, promise);
+                    view.disableElementWhileRunning(link, function(){return promise});
                     expect(link).toHaveClass("is-disabled");
                     deferred.resolve();
                     expect(link).not.toHaveClass("is-disabled");
