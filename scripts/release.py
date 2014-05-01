@@ -2,14 +2,17 @@
 """
 a release-master multitool
 """
+from __future__ import print_function, unicode_literals
+import sys
 from path import path
-from git import Repo
+from git import Repo, Commit
 import argparse
 from datetime import date, timedelta
 from dateutil.parser import parse as parse_datestring
 import re
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import textwrap
+import requests
 
 IGNORED_EMAILS = set(("vagrant@precise32.(none)",))
 JIRA_RE = re.compile(r"\b[A-Z]{2,}-\d+\b")
@@ -36,7 +39,20 @@ def make_parser():
     parser.add_argument(
         '--table', '-t', action="store_true", default=False,
         help="only print table")
+    parser.add_argument(
+        '--commit-table', action="store_true", default=False,
+        help="Display table by commit, instead of by PR")
     return parser
+
+
+def ensure_pr_fetch():
+    # it would be nice to use the git-python API to do this, but it doesn't seem
+    # to support configurations with more than one value per key. :(
+    origin_fetches = git.config("remote.origin.fetch", get_all=True).splitlines()
+    pr_fetch = '+refs/pull/*/head:refs/remotes/origin/pr/*'
+    if pr_fetch not in origin_fetches:
+        git.config("remote.origin.fetch", pr_fetch, add=True)
+        git.fetch()
 
 
 def default_release_date():
@@ -92,25 +108,136 @@ def commits_by_email(commit_range, include_merge=False):
         data[email] = sorted(commits, key=lambda c: c.authored_date)
     return data
 
+class InvalidBranchName(Exception): pass
 
-def generate_table(commit_range, include_merge=False):
+def get_pr_num_from_remote_branch(branch_name):
+    # branch name should look like remotes/origin/pr/1234
+    parts = branch_name.split("/")
+    if len(parts) != 4:
+        raise InvalidBranchName(branch_name)
+    if parts[0] != "remotes" or parts[1] != "origin" or parts[2] != "pr":
+        raise InvalidBranchName(branch_name)
+    try:
+        num = int(parts[3])
+    except ValueError:
+        raise InvalidBranchName(branch_name)
+    return num
+
+
+def get_merge_commit(commit, branch="master"):
+    """
+    Given a commit that was merged into the given branch, return the merge commit
+    for that event.
+
+    http://stackoverflow.com/questions/8475448/find-merge-commit-which-include-a-specific-commit
+    """
+    commit_range = "{}..{}".format(commit, branch)
+    ancestry_paths = git.rev_list(commit_range, ancestry_path=True).splitlines()
+    first_parents = git.rev_list(commit_range, first_parent=True).splitlines()
+    both = set(ancestry_paths) & set(first_parents)
+    for commit_hash in reversed(ancestry_paths):
+        if commit_hash in both:
+            return repo.commit(commit_hash)
+    raise ValueError("No merge commit for {commit} in {branch}!".format(
+        commit=commit, branch=branch,
+    ))
+
+
+def prs_by_email(commit_range):
+    """
+    Returns an ordered dictionary of {email: pr_list}
+    Email is the email address of the person who merged the pull request
+    The dictionary is alphabetically ordered by email address
+    The pull request list is ordered by merge date
+    """
+    unordered_data = defaultdict(set)
+    for commit in Commit.iter_items(repo, commit_range):
+        # ignore merge commits
+        if len(commit.parents) > 1:
+            continue
+        remote_branch = git.describe(commit, all=True, contains=True)
+        try:
+            pr_num = get_pr_num_from_remote_branch(remote_branch)
+        except InvalidBranchName:
+            print(
+                "Invalid remote branch {branch} for commit {commit}".format(
+                    branch=remote_branch, commit=commit,
+                ),
+                file=sys.stderr,
+            )
+        merge = get_merge_commit(commit)
+        unordered_data[merge.author.email].add((pr_num, merge.authored_date))
+
+    ordered_data = OrderedDict()
+    for email in sorted(unordered_data.keys()):
+        ordered = sorted(unordered_data[email], key=lambda num_date: num_date[1])
+        ordered_data[email] = [num for num, date in ordered]
+    return ordered_data
+
+
+def generate_table_by_commit(commit_range, include_merge=False):
     """
     Return a string corresponding to a commit table to embed in Confluence
     """
-    header = u"||Author||Summary||Commit||JIRA||Verified?||"
+    header = "||Author||Summary||Commit||JIRA||Verified?||"
     commit_link = "[commit|https://github.com/edx/edx-platform/commit/{sha}]"
     rows = [header]
     cbe = commits_by_email(commit_range, include_merge)
     for email, commits in cbe.items():
         for i, commit in enumerate(commits):
-            rows.append(u"| {author} | {summary} | {commit} | {jira} | {verified} |".format(
+            rows.append("| {author} | {summary} | {commit} | {jira} | {verified} |".format(
                 author=email if i == 0 else "",
                 summary=commit.summary.replace("|", "\|"),
                 commit=commit_link.format(sha=commit.hexsha),
                 jira=", ".join(parse_ticket_references(commit.message)),
                 verified="",
             ))
-    return u"\n".join(rows)
+    return "\n".join(rows)
+
+
+def get_pr_info(num):
+    """
+    Returns the info from the Github API
+    """
+    url = "https://api.github.com/repos/edx/edx-platform/pulls/{num}".format(num=num)
+    response = requests.get(url)
+    result = response.json()
+    if not response.ok:
+        raise requests.exceptions.RequestException(result["message"])
+    return result
+
+
+def generate_table_by_pr(commit_range):
+    """
+    Return a string corresponding to a commit table to embed in Confluence
+    """
+    header = "|| Merged By || Title || PR || JIRA || Verified? ||"
+    pr_link = "[#{num}|https://github.com/edx/edx-platform/pull/{num}]"
+    rows = [header]
+    prbe = prs_by_email(commit_range)
+    for email, pull_requests in prbe.items():
+        for i, pull_request in enumerate(pull_requests):
+            try:
+                pr_info = get_pr_info(pull_request)
+                title = pr_info["title"] or ""
+                body = pr_info["body"] or ""
+            except requests.exceptions.RequestException as e:
+                print(
+                    "Warning: could not fetch data for #{num}: {message}".format(
+                        num=pull_request, message=e.message
+                    ),
+                    file=sys.stderr,
+                )
+                title = "?"
+                body = "?"
+            rows.append("| {merged_by} | {title} | {pull_request} | {jira} | {verified} |".format(
+                merged_by=email if i == 0 else "",
+                title=title.replace("|", "\|"),
+                pull_request=pr_link.format(num=pull_request),
+                jira=", ".join(parse_ticket_references(body)),
+                verified="",
+            ))
+    return "\n".join(rows)
 
 
 def generate_email(commit_range, release_date=None):
@@ -149,7 +276,10 @@ def main():
     commit_range = "{0}..{1}".format(args.previous, args.current)
 
     if args.table:
-        print(generate_table(commit_range, include_merge=args.merge))
+        if args.commit_table:
+            print(generate_table_by_commit(commit_range, include_merge=args.merge))
+        else:
+            print(generate_table_by_pr(commit_range))
         return
 
     print("EMAIL:")
@@ -161,7 +291,10 @@ def main():
         "in your release wiki page"
     )
     print("\n")
-    print(generate_table(commit_range, include_merge=args.merge).encode('UTF-8'))
+    if args.commit_table:
+        print(generate_table_by_commit(commit_range, include_merge=args.merge))
+    else:
+        print(generate_table_by_pr(commit_range))
 
 if __name__ == "__main__":
     main()
