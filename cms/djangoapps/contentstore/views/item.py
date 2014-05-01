@@ -35,6 +35,7 @@ from ..utils import get_modulestore
 from .access import has_course_access
 from .helpers import _xmodule_recurse
 from contentstore.utils import compute_publish_state, PublishState
+from contentstore.views.helpers import get_parent_xblock
 from contentstore.views.preview import get_preview_fragment
 from edxmako.shortcuts import render_to_string
 from models.settings.course_grading import CourseGradingModel
@@ -196,8 +197,7 @@ def xblock_view_handler(request, package_id, view_name, tag=None, branch=None, v
     if 'application/json' in accept_header:
         store = get_modulestore(old_location)
         component = store.get_item(old_location)
-        component_publish_state = compute_publish_state(component)
-        is_read_only_view = component_publish_state == PublishState.public
+        is_read_only = _xblock_is_read_only(component)
 
         # wrap the generated fragment in the xmodule_editor div so that the javascript
         # can bind to it correctly
@@ -220,7 +220,7 @@ def xblock_view_handler(request, package_id, view_name, tag=None, branch=None, v
             context = {
                 'runtime_type': 'studio',
                 'container_view': False,
-                'read_only': is_read_only_view,
+                'read_only': is_read_only,
                 'root_xblock': component,
             }
             # For non-leaf xblocks on the unit page, show the special rendering
@@ -243,7 +243,7 @@ def xblock_view_handler(request, package_id, view_name, tag=None, branch=None, v
             context = {
                 'runtime_type': 'studio',
                 'container_view': is_container_view,
-                'read_only': is_read_only_view,
+                'read_only': is_read_only,
                 'root_xblock': component,
             }
 
@@ -271,6 +271,18 @@ def xblock_view_handler(request, package_id, view_name, tag=None, branch=None, v
 
     else:
         return HttpResponse(status=406)
+
+
+def _xblock_is_read_only(xblock):
+    """
+    Returns true if the specified xblock is read-only, meaning that it cannot be edited.
+    """
+    # Only units and their children can be in draft mode
+    parent_xblock = get_parent_xblock(xblock)
+    if not parent_xblock:
+        return False
+    component_publish_state = compute_publish_state(xblock)
+    return component_publish_state == PublishState.public
 
 
 def _save_item(request, usage_loc, item_location, data=None, children=None, metadata=None, nullout=None,
