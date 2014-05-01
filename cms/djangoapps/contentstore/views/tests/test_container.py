@@ -132,7 +132,7 @@ class ContainerViewTestCase(CourseTestCase):
         self._test_preview_html(draft_container)
 
     def _test_preview_html(self, xblock):
-        locator = loc_mapper().translate_location(None, xblock.location, published=False)
+        locator = loc_mapper().translate_location(self.course.id, xblock.location, published=False)
         publish_state = compute_publish_state(xblock)
         preview_url = '/xblock/{locator}/container_preview'.format(locator=locator)
 
