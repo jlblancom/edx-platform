@@ -165,7 +165,16 @@ define(["coffee/src/views/unit", "js/models/module_info", "js/spec_helpers/creat
         describe("Disabled edit/publish links during ajax call", function() {
             var unit,
                 link,
-                selectors = [".publish-draft", ".create-draft"],
+                draft_states = [
+                    {
+                        state: "draft",
+                        selector: ".publish-draft"
+                    },
+                    {
+                        state: "public",
+                        selector: ".create-draft"
+                    }
+                ],
                 editLinkFixture =
                 '<div class="main-wrapper edit-state-draft" data-locator="unit_locator"> \
                   <div class="unit-settings window"> \
@@ -182,55 +191,49 @@ define(["coffee/src/views/unit", "js/models/module_info", "js/spec_helpers/creat
                     </div> \
                   </div> \
                 </div>';
-            beforeEach(function () {
-                setFixtures(editLinkFixture);
-                unit = new UnitEditView({
-                    el: $('.main-wrapper'),
-                    model: new ModuleModel({
-                        id: 'unit_locator',
-                        state: 'draft'
-                    })
-                });
-                // needed to stub out the ajax
-                window.analytics = jasmine.createSpyObj('analytics', ['track']);
-                window.course_location_analytics = jasmine.createSpy('course_location_analytics');
-                window.unit_location_analytics = jasmine.createSpy('unit_location_analytics');
-            });
-
-            function test_link_disabled_during_ajax_call(selector) {
-                it("disables the " + selector + " link once it is clicked", function() {
-                    // don't return anything from ajax, so "removeClass"
-                    // is never called
-                    spyOn($, "ajax").andCallThrough();
-                    spyOn($.fn, "removeClass");
-                    link = $(selector);
-                    link.click();
-                    expect(link).toHaveClass("is-disabled");
-                    expect($.fn.removeClass).not.toHaveBeenCalledWith("is-disabled");
-                });
-
-                it("reenables the " + selector + " link once the ajax call returns", function() {
-                    spyOn($, "ajax").andCallFake(function(e) {
-                        return e.success({});
+            function test_link_disabled_during_ajax_call(draft_state) {
+                beforeEach(function () {
+                    setFixtures(editLinkFixture);
+                    unit = new UnitEditView({
+                        el: $('.main-wrapper'),
+                        model: new ModuleModel({
+                            id: 'unit_locator',
+                            state: draft_state['state']
+                        })
                     });
-                    spyOn($.fn, 'addClass');
-                    spyOn($.fn, 'removeClass');
-                    link = $(selector);
-                    link.click();
+                    // needed to stub out the ajax
+                    window.analytics = jasmine.createSpyObj('analytics', ['track']);
+                    window.course_location_analytics = jasmine.createSpy('course_location_analytics');
+                    window.unit_location_analytics = jasmine.createSpy('unit_location_analytics');
+                });
 
-                    // check that the `is-disabled` class was added and removed
-                    expect($.fn.addClass).toHaveBeenCalledWith("is-disabled");
-                    expect($.fn.removeClass).toHaveBeenCalledWith("is-disabled");
+                it("reenables the " + draft_state['selector'] + " link once the ajax call returns", function() {
+                    runs(function(){
+                        spyOn($, "ajax").andCallThrough();
+                        spyOn($.fn, 'addClass').andCallThrough();
+                        spyOn($.fn, 'removeClass').andCallThrough();
+                        link = $(draft_state['selector']);
+                        link.click();
+                    });
+                    waitsFor(function(){
+                        // wait for "is-disabled" to be removed as a class
+                        return !($(draft_state['selector']).hasClass("is-disabled"));
+                    }, 500);
+                    runs(function(){
+                        // check that the `is-disabled` class was added and removed
+                        expect($.fn.addClass).toHaveBeenCalledWith("is-disabled");
+                        expect($.fn.removeClass).toHaveBeenCalledWith("is-disabled");
 
-                    // make sure the link finishes without the `is-disabled` class
-                    expect(link).not.toHaveClass("is-disabled");
+                        // make sure the link finishes without the `is-disabled` class
+                        expect(link).not.toHaveClass("is-disabled");
 
-                    // affirm that ajax was called
-                    expect($.ajax).toHaveBeenCalled();
+                        // affirm that ajax was called
+                        expect($.ajax).toHaveBeenCalled();
+                    });
                 });
             };
-            for (var i = 0; i < selectors.length; i++) {
-                test_link_disabled_during_ajax_call(selectors[i]);
+            for (var i = 0; i < draft_states.length; i++) {
+                test_link_disabled_during_ajax_call(draft_states[i]);
             };
         });
     }
