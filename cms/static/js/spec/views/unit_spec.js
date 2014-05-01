@@ -201,7 +201,7 @@ define(["coffee/src/views/unit", "js/models/module_info", "js/spec_helpers/creat
                 it("disables the " + selector + " link once it is clicked", function() {
                     // don't return anything from ajax, so "removeClass"
                     // is never called
-                    spyOn($, "ajax");
+                    spyOn($, "ajax").andCallThrough();
                     spyOn($.fn, "removeClass");
                     link = $(selector);
                     link.click();
@@ -210,8 +210,8 @@ define(["coffee/src/views/unit", "js/models/module_info", "js/spec_helpers/creat
                 });
 
                 it("reenables the " + selector + " link once the ajax call returns", function() {
-                    spyOn($, "ajax").andCallFake(function(params) {
-                        params.success({});
+                    spyOn($, "ajax").andCallFake(function(e) {
+                        return e.success({});
                     });
                     spyOn($.fn, 'addClass');
                     spyOn($.fn, 'removeClass');
