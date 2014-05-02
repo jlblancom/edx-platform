@@ -86,9 +86,9 @@ define([ "jquery", "js/spec_helpers/create_sinon", "js/spec_helpers/view_helpers
                         handleY = handle.offset().top + (handle.height() / 2),
                         dy = y - handleY;
                     // If dragging down, adjust for the component itself being removed
-                    // TODO: why does this need an additional 20(ish) pixels?
+                    // TODO: why does this need an additional 30(ish) pixels?
                     if (dy > 0) {
-                        dy -= getComponent(locator).height() + 20;
+                        dy -= getComponent(locator).height() + 30;
                     }
                     handle.simulate("drag", {dy: dy});
                 };
